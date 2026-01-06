@@ -14,12 +14,14 @@ class EnvParams(NamedTuple):
     g = -9.8
     mass_cart = 1
     mass_pole = 0.1
-    total_mass = property(lambda self: self.mass_pole + self.mass_cart)
     length_pole = 0.5
-    polemass_length = property(lambda self: self.mass_pole * self.length_pole)
     friction_cart_ground = 0.005
     friction_pole_cart = 0.000002
     force_magnitude = 10
+    
+    # Derived constants pre-calculated
+    total_mass = 1.1 # mass_cart + mass_pole
+    polemass_length = 0.05 # mass_pole * length_pole
 
     # extra env variables
     tau = 0.02
