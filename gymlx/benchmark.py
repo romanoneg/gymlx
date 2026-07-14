@@ -22,7 +22,7 @@ def benchmark(env_id: str = "CartPole-v1", num_envs: int = 131072, total_steps: 
     step_keys = mx.random.split(step_key, num_envs)
 
     vmap_reset = mx.compile(mx.vmap(env.reset))
-    vmap_step = mx.compile(mx.vmap(env.step))
+    vmap_step = mx.compile(mx.vmap(lambda s, a, k: env.step(s, a, key=k)))
 
     obs, state, info = vmap_reset(reset_keys)
     mx.eval(obs, state)
@@ -31,7 +31,8 @@ def benchmark(env_id: str = "CartPole-v1", num_envs: int = 131072, total_steps: 
 
     # Warmup
     for _ in range(10):
-        obs, reward, terminated, truncated, state, info = vmap_step(step_keys, state, actions)
+        obs, reward, terminated, truncated, state, info = vmap_step(state, actions, step_keys)
+        step_keys = mx.random.split(step_keys[0], num_envs)
     mx.eval(state)
 
     # Calculate iterations
@@ -44,7 +45,8 @@ def benchmark(env_id: str = "CartPole-v1", num_envs: int = 131072, total_steps: 
         start = time.perf_counter()
         for _ in range(num_chunks):
             for _ in range(actual_chunk):
-                obs, reward, terminated, truncated, state, info = vmap_step(step_keys, state, actions)
+                obs, reward, terminated, truncated, state, info = vmap_step(state, actions, step_keys)
+                step_keys = mx.random.split(step_keys[0], num_envs)
             mx.eval(state)
         elapsed = time.perf_counter() - start
 

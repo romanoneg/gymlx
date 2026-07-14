@@ -80,7 +80,7 @@ class MountainCarContinuous(Env[EnvState, EnvParams]):
         position = mx.random.uniform(low=-0.6, high=-0.4, shape=(), key=key)
         return EnvState(position, mx.array(0.0), mx.array(0))
 
-    def step_env(self, key: mx.array, state: EnvState, action: int | float | mx.array, params: EnvParams
+    def step_env(self, state: EnvState, action: int | float | mx.array, key: mx.array, params: EnvParams
                  ) -> tuple[mx.array, mx.array, mx.array, EnvState, dict[Any, Any]]:
         # Check if stepping from an already-done state
         prev_done = self.is_terminal(state, params) | self.is_truncated(state, params)

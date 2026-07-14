@@ -32,7 +32,7 @@ def test_vmap_step(env_id):
 
     actions = mx.zeros(BATCH_SIZE, dtype=mx.int32)
     vmap_step = mx.vmap(env.step)
-    obs, reward, terminated, truncated, state, info = vmap_step(keys, state, actions)
+    obs, reward, terminated, truncated, state, info = vmap_step(state, actions)
     mx.eval(obs, reward, state)
 
     assert obs.shape[0] == BATCH_SIZE
@@ -59,7 +59,7 @@ def test_compile_step(env_id):
 
     compiled_step = mx.compile(env.step)
     action = mx.array(0)
-    obs, reward, terminated, truncated, state, info = compiled_step(key, state, action)
+    obs, reward, terminated, truncated, state, info = compiled_step(state, action)
     mx.eval(obs, state)
 
 
@@ -77,7 +77,7 @@ def test_vmap_compile_combined(env_id):
 
     actions = mx.zeros(BATCH_SIZE, dtype=mx.int32)
     for _ in range(5):
-        obs, reward, terminated, truncated, state, info = vmap_step(keys, state, actions)
+        obs, reward, terminated, truncated, state, info = vmap_step(state, actions)
 
     mx.eval(obs, state)
     assert obs.shape[0] == BATCH_SIZE

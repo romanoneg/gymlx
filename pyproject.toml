@@ -18,3 +18,6 @@ dev = [
 
 [project.scripts]
 gymlx-benchmark = "gymlx.benchmark:main"
+
+[tool.setuptools.packages.find]
+include = ["gymlx*"]

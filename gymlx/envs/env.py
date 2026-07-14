@@ -1,6 +1,5 @@
 """Base environment class for gymlx."""
 import mlx.core as mx
-import mlx.utils
 from typing import NamedTuple, Generic, TypeVar, Any
 from abc import ABC, abstractmethod
 
@@ -14,69 +13,90 @@ class Env(ABC, Generic[TEnvState, TEnvParams]):
     gymlx uses a functional API where state is explicitly passed and returned.
     This enables vmap and compile for massive parallelization on GPU.
 
-    Key differences from gymnasium:
-    - State is explicit: step(key, state, action) -> (obs, reward, term, trunc, state, info)
-    - Auto-reset: when done, state is automatically reset (no manual reset needed in loops)
-    - Random keys: MLX random keys must be passed for reproducibility
+    Key features:
+    - State is explicit: step(state, action) -> (obs, reward, term, trunc, state, info)
+    - Auto-reset: when done, state is automatically reset (controllable)
+    - Optional keys: Pass MLX random keys for reproducibility, or omit to use global RNG
 
-    Usage:
+    Usage (with explicit key):
         env = gymlx.make("CartPole-v1")
         key = mx.random.key(0)
         obs, state, info = env.reset(key)
+        key, subkey = mx.random.split(key)
+        obs, reward, term, trunc, state, info = env.step(state, action, key=subkey)
 
-        # Single step
-        obs, reward, term, trunc, state, info = env.step(key, state, action)
+    Usage (keyless - uses global RNG):
+        env = gymlx.make("CartPole-v1")
+        obs, state, info = env.reset()  # Uses global RNG
+        obs, reward, term, trunc, state, info = env.step(state, action)  # Uses global RNG
 
-        # Vectorized (1000 parallel envs)
+    Vectorized (1000 parallel envs):
         vmap_reset = mx.compile(mx.vmap(env.reset))
         vmap_step = mx.compile(mx.vmap(env.step))
-        keys = mx.random.split(key, 1000)
-        obs, state, info = vmap_reset(keys)
+        keys = mx.random.split(mx.random.key(0), 1000)
+        obs, states, info = vmap_reset(keys)
+
+        # Pass keys as third positional argument for reproducibility:
+        step_keys = mx.random.split(mx.random.key(1), 1000)
+        obs, reward, term, trunc, states, info = vmap_step(states, actions, step_keys)
     """
 
     def __init__(self):
         return
 
-    def step(self, key: mx.array, state: TEnvState, action: int | float | mx.array, params: TEnvParams | None = None
+    def step(self, state: TEnvState, action: int | float | mx.array,
+             key: mx.array = None, params: TEnvParams | None = None,
+             auto_reset: bool = True
              ) -> tuple[mx.array, mx.array, mx.array, mx.array, TEnvState, dict[Any, Any]]:
-        """Execute one environment step with auto-reset.
+        """Execute one environment step.
 
         Args:
-            key: MLX random key for stochastic transitions
-            state: Current environment state
+            state: Environment state
             action: Action to take
+            key: Optional MLX random key. If None, uses global RNG.
             params: Optional environment parameters (uses default_params if None)
+            auto_reset: If True (default), automatically reset done environments.
 
         Returns:
             obs: Observation array
             reward: Scalar reward
             terminated: Whether episode ended due to terminal state
             truncated: Whether episode ended due to time limit
-            state: Next state (auto-reset if done)
+            state: Next state (auto-reset if done and auto_reset=True)
             info: Additional information dict
         """
         params = self.default_params if params is None else params
-        step_key, reset_key = mx.random.split(key)
 
-        obs, reward, terminated, truncated, state, info = self.step_env(step_key, state, action, params)
-        done = mx.logical_or(terminated, truncated)
+        if auto_reset:
+            # Split key only if provided; otherwise both use global RNG
+            if key is not None:
+                step_key, reset_key = mx.random.split(key)
+            else:
+                step_key, reset_key = None, None
+            reward, terminated, truncated, step_state, info = self.step_env(state, action, step_key, params)
+            done = terminated | truncated
 
-        res_obs, res_state, _ = self.reset(reset_key, params)
+            reset_state = self.reset_state(reset_key, params)
 
-        obs = mx.where(done, res_obs, obs)
-        state = mlx.utils.tree_map(
-            lambda t, f: mx.where(done, t, f),
-            res_state, state
-            )
+            # Select between step state and reset state
+            state = type(reset_state)(*(
+                mx.where(done, getattr(reset_state, f), getattr(step_state, f))
+                for f in reset_state._fields
+            ))
+        else:
+            # no need to split key since no reset is happening
+            reward, terminated, truncated, state, info = self.step_env(state, action, key, params)
 
+        obs = self.get_obs(state, params)
         return (obs, reward, terminated, truncated, state, info)
 
-    def reset(self, key: mx.array, params: TEnvParams | None = None
+    def reset(self, key: mx.array = None, params: TEnvParams | None = None
               ) -> tuple[mx.array, TEnvState, dict[Any, Any]]:
         """Reset environment to initial state.
 
         Args:
-            key: MLX random key for initial state sampling
+            key: Optional MLX random key for initial state sampling.
+                 If None, uses global RNG state.
             params: Optional environment parameters (uses default_params if None)
 
         Returns:
@@ -86,8 +106,9 @@ class Env(ABC, Generic[TEnvState, TEnvParams]):
         """
         if params is None:
             params = self.default_params
-        obs, state, info = self.reset_env(key, params)
-        return obs, state, info
+        state = self.reset_state(key, params)
+        obs = self.get_obs(state, params)
+        return obs, state, {}
 
     @property
     @abstractmethod
@@ -108,14 +129,23 @@ class Env(ABC, Generic[TEnvState, TEnvParams]):
         raise NotImplementedError
 
     @abstractmethod
-    def step_env(self, key: mx.array, state: TEnvState, action: int | float | mx.array, params: TEnvParams
-                 ) -> tuple[mx.array, mx.array, mx.array, mx.array, TEnvState, dict[Any, Any]]:
-        """Internal step implementation (override in subclass)."""
+    def step_env(self, state: TEnvState, action: int | float | mx.array, key: mx.array, params: TEnvParams
+                 ) -> tuple[mx.array, mx.array, mx.array, TEnvState, dict[Any, Any]]:
+        """Internal step implementation (override in subclass).
+
+        Returns: (reward, terminated, truncated, state, info) - observation is computed separately via get_obs.
+        Note: key may be None when using global RNG.
+        """
         raise NotImplementedError
 
     @abstractmethod
-    def reset_env(self, key: mx.array, params: TEnvParams) -> tuple[mx.array, TEnvState, dict[Any, Any]]:
-        """Internal reset implementation (override in subclass)."""
+    def reset_state(self, key: mx.array, params: TEnvParams) -> TEnvState:
+        """Reset and return initial state only (no observation computation)."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_obs(self, state: TEnvState, params: TEnvParams) -> mx.array:
+        """Compute observation from state. Called once after state selection."""
         raise NotImplementedError
 
     @property

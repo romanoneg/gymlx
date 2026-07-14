@@ -28,10 +28,10 @@ class EnvParams(NamedTuple):
     friction_cart_ground: float = 0.005
     friction_pole_cart: float = 0.000002
     force_magnitude: float = 10.0
-    total_mass: float = 1.1
-    polemass_length: float = 0.05
+    total_mass: float = 1.1 # mass_cart + mass_pole
+    polemass_length: float = 0.05 # mass_pole * length
     tau: float = 0.02
-    theta_threshold_radians: float = 0.2094395  # 12 * 2 * pi / 360
+    theta_threshold_radians: float = 12 * 2 * mx.pi / 360
     x_threshold: float = 2.4
     max_steps_in_episode: int = 500
 
@@ -57,7 +57,7 @@ class CartPole(Env[EnvState, EnvParams]):
 
     @property
     def observation_space(self) -> Box:
-        high = mx.array([4.8, mx.inf, 0.418, mx.inf])
+        high = mx.array([4.8, mx.inf, 0.41887903, mx.inf])
         return Box(low=-high, high=high, shape=(4,), dtype=mx.float32)
 
     @property
@@ -83,14 +83,14 @@ class CartPole(Env[EnvState, EnvParams]):
     def reset_state(self, key: mx.array, params: EnvParams) -> EnvState:
         """Reset and return initial state."""
         vals = mx.random.uniform(low=-0.05, high=0.05, shape=(4,), key=key)
-        return EnvState(vals[0], vals[1], vals[2], vals[3], mx.array(0))
+        return EnvState(*vals, mx.array(0))
 
-    def step_env(self, key: mx.array, state: EnvState, action: int | float | mx.array, params: EnvParams
+    def step_env(self, state: EnvState, action: int | float | mx.array, key: mx.array, params: EnvParams
                  ) -> tuple[mx.array, mx.array, mx.array, EnvState, dict[Any, Any]]:
         # Check if stepping from an already-done state
         prev_done = self.is_terminal(state, params) | self.is_truncated(state, params)
 
-        force = params.force_magnitude * (2 * action - 1)
+        force = params.force_magnitude * action - params.force_magnitude * (1 - action)
         costheta = mx.cos(state.theta)
         sintheta = mx.sin(state.theta)
 

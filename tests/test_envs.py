@@ -27,7 +27,7 @@ def test_step_returns_tuple_of_six(env_id):
     obs, state, info = env.reset(key)
 
     action = mx.array(0)
-    result = env.step(key, state, action)
+    result = env.step(state, action)
 
     assert len(result) == 6, f"{env_id}: step should return 6 values"
 
@@ -40,7 +40,7 @@ def test_step_produces_valid_reward(env_id):
     obs, state, info = env.reset(key)
 
     action = mx.array(0)
-    obs, reward, terminated, truncated, state, info = env.step(key, state, action)
+    obs, reward, terminated, truncated, state, info = env.step(state, action)
     mx.eval(reward)
 
     assert reward.ndim == 0 or reward.shape == (), f"{env_id}: reward should be scalar"
@@ -54,7 +54,7 @@ def test_terminated_truncated_are_boolean(env_id):
     obs, state, info = env.reset(key)
 
     action = mx.array(0)
-    obs, reward, terminated, truncated, state, info = env.step(key, state, action)
+    obs, reward, terminated, truncated, state, info = env.step(state, action)
     mx.eval(terminated, truncated)
 
     assert terminated.dtype == mx.bool_ or terminated.ndim == 0
@@ -69,8 +69,7 @@ def test_multiple_steps_work(env_id):
     obs, state, info = env.reset(key)
 
     for i in range(10):
-        key = mx.random.key(i)
         action = mx.array(0)
-        obs, reward, terminated, truncated, state, info = env.step(key, state, action)
+        obs, reward, terminated, truncated, state, info = env.step(state, action)
 
     mx.eval(obs, state)
